@@ -1417,13 +1417,64 @@ with tab3:
 st.markdown("""
 <style>
 body {
-    font-family: Arial, sans-serif;
+    font-family: 'Arial', sans-serif;
+    font-size: 18px; /* Larger base font size */
+    line-height: 1.6;
+    background-color: #f8f9fa; /* Light gray background like Bootstrap */
+    color: #333;
+}
+h1 {
+    font-size: 2.5rem; /* Larger title */
+    font-weight: bold;
+    color: #2c3e50;
+    margin-bottom: 1.5rem;
+}
+h2 {
+    font-size: 1.8rem;
+    font-weight: 600;
+    color: #34495e;
+    margin-top: 1rem;
 }
 .stTabs [role="tab"] {
-    font-size: 16px;
+    font-size: 1.2rem; /* Larger tab font */
+    font-weight: 500;
+    padding: 10px 20px;
+    background-color: #e9ecef;
+    border-radius: 5px 5px 0 0;
+    margin-right: 5px;
+    color: #495057;
+}
+.stTabs [role="tab"][aria-selected="true"] {
+    background-color: #007bff; /* Bootstrap primary blue for active tab */
+    color: white;
+}
+.stTabs [role="tab"]:hover {
+    background-color: #dee2e6;
 }
 .stDataFrame {
     width: 100%;
+    border: 1px solid #dee2e6;
+    border-radius: 5px;
+    overflow-x: auto;
+}
+.stDataFrame table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.stDataFrame th {
+    background-color: #007bff; /* Blue headers like Dash */
+    color: white;
+    font-weight: bold;
+    padding: 12px;
+    text-align: center;
+}
+.stDataFrame td {
+    padding: 10px;
+    text-align: center;
+    border-bottom: 1px solid #dee2e6;
+}
+.stDataFrame tr:hover {
+    background-color: #f1f3f5; /* Hover effect */
 }
 </style>
 """, unsafe_allow_html=True)
