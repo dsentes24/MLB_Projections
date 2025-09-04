@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import os
 import sys
 import time
@@ -11,19 +10,14 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from datetime import date, datetime, timedelta
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
 import requests
 import streamlit as st
 import pandas as pd
 import numpy as np
-import dash
-from dash import html, dash_table, dcc
-from dash.dependencies import Input, Output, State
 import statsmodels.api as sm
 from scipy import stats
 import plotly.express as px
-
-st.title("My Auto-Refreshing Query")
+from streamlit_autorefresh import st_autorefresh
 
 # Logging Configuration
 LOG_LEVEL = os.environ.get("PROJECTIONS_LOG_LEVEL", "INFO").upper()
@@ -1043,158 +1037,6 @@ def backtest_hr_projections(hr_projections_df: pd.DataFrame) -> Dict[str, float]
     hit_rate = np.mean(actual)
     return {"brier_score": brier_score, "hit_rate": hit_rate}
 
-# Dash UI Helpers
-STYLE_TABLE = {
-    'overflowX': 'auto',
-    'margin': '20px auto',
-    'width': '100%',
-    'maxWidth': '98vw',
-    'border': '1px solid #dee2e6',
-    'boxSizing': 'border-box',
-}
-STYLE_CELL = {
-    'textAlign': 'left',
-    'padding': '10px',
-    'minWidth': '100px',
-    'maxWidth': '150px',
-    'whiteSpace': 'normal',
-    'wordWrap': 'break-word',
-    'fontSize': '14px',
-}
-STYLE_HEADER = {
-    'fontWeight': 'bold',
-    'backgroundColor': '#e9ecef',
-    'color': '#495057',
-    'borderBottom': '2px solid #dee2e6',
-    'fontSize': '14px',
-}
-STYLE_DATA_CONDITIONAL = [
-    {'if': {'filter_query': '{ProjectionStatus} = "Correct"'}, 'backgroundColor': '#d4edda', 'color': '#155724'},
-    {'if': {'filter_query': '{ProjectionStatus} = "Incorrect"'}, 'backgroundColor': '#f8d7da', 'color': '#721c24'},
-    {'if': {'filter_query': '{ProjectionStatus} = "Leading"'}, 'backgroundColor': '#d4edda', 'color': '#155724'},
-    {'if': {'filter_query': '{ProjectionStatus} = "Trailing"'}, 'backgroundColor': '#f8d7da', 'color': '#721c24'},
-    {'if': {'filter_query': '{ProjectionStatus} = "Tied"'}, 'backgroundColor': '#fff3cd', 'color': '#856404'},
-    {'if': {'filter_query': '{ProjectionStatus} = "Hit So Far"'}, 'backgroundColor': '#d4edda', 'color': '#155724'},
-    {'if': {'filter_query': '{ProjectionStatus} = "Not Yet"'}, 'backgroundColor': '#fff3cd', 'color': '#856404'},
-]
-
-# CSS for improved styling
-CSS_STYLES = """
-body {
-    font-family: Arial, sans-serif;
-    margin: 0;
-    padding: 20px;
-    background-color: #f8f9fa;
-}
-h1 {
-    color: #343a40;
-    margin-bottom: 20px;
-}
-.custom-container {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 20px;
-    margin-bottom: 30px;
-    flex-wrap: wrap;
-}
-.custom-label {
-    font-size: 16px;
-    color: #495057;
-    margin-right: 10px;
-}
-.custom-datepicker {
-    border: 1px solid #ced4da;
-    border-radius: 5px;
-    padding: 8px;
-    font-size: 16px;
-    width: 200px;
-}
-.custom-slider {
-    width: 300px;
-    margin: 0 10px;
-}
-.custom-slider .rc-slider-mark-text {
-    font-size: 14px;
-    color: #495057;
-    margin-top: 8px;
-}
-.custom-slider .rc-slider-rail {
-    background-color: #dee2e6;
-    height: 6px;
-}
-.custom-slider .rc-slider-track {
-    background-color: #007bff;
-}
-.custom-slider .rc-slider-handle {
-    border: 2px solid #007bff;
-    background-color: #fff;
-    width: 16px;
-    height: 16px;
-}
-.dash-table-container {
-    max-width: 98vw;
-    margin: 0 auto;
-    overflow-x: auto;
-}
-"""
-
-def prepare_data(season: str = "2025", recent_games: int = 30, date_str: Optional[str] = None) -> Tuple[pd.DataFrame, ...]:
-    if date_str is None:
-        date_str = date.today().strftime('%Y-%m-%d')
-    logger.info("Preparing data for %s with recent_games=%d", date_str, recent_games)
-    with ThreadPoolExecutor(max_workers=7) as executor:
-        f_pitch = executor.submit(fetch_mlb_pitching_stats, season)
-        f_rec_pitch = executor.submit(fetch_mlb_pitching_stats, season, recent_games)
-        f_team_bat = executor.submit(fetch_mlb_team_batting_stats, season)
-        f_rec_team_bat = executor.submit(fetch_mlb_team_batting_stats, season, recent_games)
-        f_player_bat = executor.submit(fetch_mlb_player_batting_stats, season)
-        f_rec_player_bat = executor.submit(fetch_mlb_player_batting_stats, season, recent_games)
-        f_sched = executor.submit(fetch_mlb_schedule, date_str)
-        pitching_df = f_pitch.result()
-        recent_pitching_df = f_rec_pitch.result()
-        team_batting_df = f_team_bat.result()
-        recent_team_batting_df = f_rec_team_bat.result()
-        player_batting_df = f_player_bat.result()
-        recent_player_batting_df = f_rec_player_bat.result()
-        schedule_df = f_sched.result()
-    for df in [pitching_df, recent_pitching_df, team_batting_df, recent_team_batting_df, player_batting_df, recent_player_batting_df]:
-        normalize_team_column(df)
-    return schedule_df, pitching_df, team_batting_df, player_batting_df, recent_pitching_df, recent_team_batting_df, recent_player_batting_df
-
-# Add these if not already present (from your code)
-MLB_API_BASE = "https://statsapi.mlb.com/api/v1"
-_FETCH_CACHE = {}
-def http_get_json(url: str, *, timeout: int = 15, retries: int = 3) -> Optional[Dict[str, Any]]:
-    key = url  # Simplified for this
-    if key in _FETCH_CACHE:
-        return _FETCH_CACHE[key]
-    for attempt in range(retries):
-        try:
-            resp = requests.get(url, timeout=timeout)
-            resp.raise_for_status()
-            data = resp.json()
-            _FETCH_CACHE[key] = data
-            return data
-        except:
-            time.sleep(1.5 ** attempt)
-    return None
-
-def parse_innings_pitched(ip_str: Any) -> float:
-    try:
-        ip_str = str(ip_str)
-        if '.' in ip_str:
-            whole, frac = ip_str.split('.')
-            return float(whole) + float(frac) / 3
-        return float(ip_str)
-    except:
-        return 0.0
-
-def coerce_float(series: pd.Series, default: float = 0.0) -> pd.Series:
-    return pd.to_numeric(series, errors="coerce").fillna(default).astype(float)
-
-FIP_CONSTANT = 3.1
-
 # Aggregate functions (add these)
 def aggregate_team_pitching_stats(gamelog_data: Dict[str, Any], as_of: Optional[str] = None, recent_games: int = 0) -> pd.DataFrame:
     team_splits = defaultdict(list)
@@ -1420,173 +1262,168 @@ def backtest_season(season: str = "2025", recent_games: int = 30) -> Dict:
     
     return results
 
-# Compute once at startup (add this line before build_dash_app)
-season_backtest_results = backtest_season()
+def prepare_data(season: str = "2025", recent_games: int = 30, date_str: Optional[str] = None) -> Tuple[pd.DataFrame, ...]:
+    if date_str is None:
+        date_str = date.today().strftime('%Y-%m-%d')
+    logger.info("Preparing data for %s with recent_games=%d", date_str, recent_games)
+    with ThreadPoolExecutor(max_workers=7) as executor:
+        f_pitch = executor.submit(fetch_mlb_pitching_stats, season)
+        f_rec_pitch = executor.submit(fetch_mlb_pitching_stats, season, recent_games)
+        f_team_bat = executor.submit(fetch_mlb_team_batting_stats, season)
+        f_rec_team_bat = executor.submit(fetch_mlb_team_batting_stats, season, recent_games)
+        f_player_bat = executor.submit(fetch_mlb_player_batting_stats, season)
+        f_rec_player_bat = executor.submit(fetch_mlb_player_batting_stats, season, recent_games)
+        f_sched = executor.submit(fetch_mlb_schedule, date_str)
+        pitching_df = f_pitch.result()
+        recent_pitching_df = f_rec_pitch.result()
+        team_batting_df = f_team_bat.result()
+        recent_team_batting_df = f_rec_team_bat.result()
+        player_batting_df = f_player_bat.result()
+        recent_player_batting_df = f_rec_player_bat.result()
+        schedule_df = f_sched.result()
+    for df in [pitching_df, recent_pitching_df, team_batting_df, recent_team_batting_df, player_batting_df, recent_player_batting_df]:
+        normalize_team_column(df)
+    return schedule_df, pitching_df, team_batting_df, player_batting_df, recent_pitching_df, recent_team_batting_df, recent_player_batting_df
 
-def build_dash_app() -> dash.Dash:
-    app = dash.Dash(__name__, external_stylesheets=['https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css'])
-    app.css.append_css({'external_url': '/assets/style.css'})
+# Streamlit App
+st.title("MLB Projections Dashboard")
+
+# Initialize Session State for Data
+if 'data' not in st.session_state:
+    st.session_state.data = {}
+
+# Auto-Refresh
+st_autorefresh(interval=5 * 60 * 1000, key="datarefresh")  # Refresh every 5 minutes
+
+# User Inputs
+st.subheader("Select Parameters")
+col1, col2 = st.columns(2)
+with col1:
+    selected_date = st.date_input(
+        "Select Date",
+        value=date.today(),
+        min_value=date(2025, 1, 1),
+        max_value=date(2025, 12, 31),
+        format="YYYY-MM-DD",
+    )
+with col2:
+    recent_games = st.slider(
+        "Recent Games for Stats Blending",
+        min_value=5,
+        max_value=30,
+        value=30,
+        step=5,
+    )
+
+# Prepare Data
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def load_data(date_str, recent_games):
+    logger.info("Preparing data for %s with recent_games=%d", date_str, recent_games)
+    schedule_df, pitching_df, team_batting_df, player_batting_df, recent_pitching_df, recent_team_batting_df, recent_player_batting_df = prepare_data(
+        date_str=date_str, recent_games=recent_games
+    )
+    projections_df = project_game_outcomes(schedule_df, pitching_df, team_batting_df, recent_pitching_df, recent_team_batting_df)
+    hr_projections_df = project_home_run_hitters(schedule_df, player_batting_df, pitching_df, recent_player_batting_df, recent_pitching_df)
+    return {
+        'projections': projections_df,
+        'hr_projections': hr_projections_df,
+        'schedule': schedule_df,
+    }
+
+# Load Data
+date_str = selected_date.strftime('%Y-%m-%d')
+data = load_data(date_str, recent_games)
+st.session_state.data = data
+
+# Tabs
+tab1, tab2, tab3 = st.tabs(["Game Outcomes", "HR Projections", "Backtest"])
+
+with tab1:
+    st.subheader("Game Outcomes")
+    projections_df = data['projections']
+    if projections_df.empty:
+        st.write("No game projections available.")
+    else:
+        display_cols = [
+            'HomeTeam', 'AwayTeam', 'HomeWinProb', 'AwayWinProb', 'ProjectedWinner',
+            'HomeExpectedRuns', 'AwayExpectedRuns', 'TotalExpectedRuns', 'GameStatus',
+            'ProjectionStatus', 'HomeScore', 'AwayScore'
+        ]
+        # Conditional Formatting
+        def style_df(df):
+            def highlight_status(row):
+                if row['ProjectionStatus'] == 'Correct':
+                    return ['background-color: #d4edda; color: #155724'] * len(row)
+                elif row['ProjectionStatus'] == 'Incorrect':
+                    return ['background-color: #f8d7da; color: #721c24'] * len(row)
+                elif row['ProjectionStatus'] == 'Leading':
+                    return ['background-color: #d4edda; color: #155724'] * len(row)
+                elif row['ProjectionStatus'] == 'Trailing':
+                    return ['background-color: #f8d7da; color: #721c24'] * len(row)
+                elif row['ProjectionStatus'] == 'Tied':
+                    return ['background-color: #fff3cd; color: #856404'] * len(row)
+                return [''] * len(row)
+            return df.style.apply(highlight_status, axis=1).format(
+                {col: '{:.1f}' for col in ['HomeWinProb', 'AwayWinProb', 'HomeExpectedRuns', 'AwayExpectedRuns', 'TotalExpectedRuns']}
+            )
+        st.dataframe(style_df(projections_df[display_cols]), use_container_width=True)
+
+with tab2:
+    st.subheader("HR Projections")
+    hr_projections_df = data['hr_projections']
+    if hr_projections_df.empty:
+        st.write("No HR projections available.")
+    else:
+        display_cols = ['PlayerName', 'Team', 'HRProb', 'ProjectionStatus']
+        hr_projections_df = hr_projections_df.sort_values(by='HRProb', ascending=False)
+        def style_hr_df(df):
+            def highlight_status(row):
+                if row['ProjectionStatus'] == 'Correct':
+                    return ['background-color: #d4edda; color: #155724'] * len(row)
+                elif row['ProjectionStatus'] == 'Incorrect':
+                    return ['background-color: #f8d7da; color: #721c24'] * len(row)
+                elif row['ProjectionStatus'] == 'Hit So Far':
+                    return ['background-color: #d4edda; color: #155724'] * len(row)
+                elif row['ProjectionStatus'] == 'Not Yet':
+                    return ['background-color: #fff3cd; color: #856404'] * len(row)
+                return [''] * len(row)
+            return df.style.apply(highlight_status, axis=1).format({'HRProb': '{:.1f}'})
+        st.dataframe(style_hr_df(hr_projections_df[display_cols]), use_container_width=True)
+
+with tab3:
+    st.subheader("Backtest Results")
+    if selected_date < date.today():
+        game_back = backtest_game_projections(data['projections'])
+        hr_back = backtest_hr_projections(data['hr_projections'])
+        st.write(f"**Daily Game Backtest**: Brier Score = {game_back['brier_score']:.4f}, Accuracy = {game_back['accuracy']:.3f}")
+        st.write(f"**Daily HR Backtest**: Brier Score = {hr_back['brier_score']:.4f}, Hit Rate = {hr_back['hit_rate']:.3f}")
+    else:
+        st.write("Daily backtest not available for current or future dates.")
     
-    app.layout = html.Div([
-        html.H1("MLB Projections Dashboard", className='text-center mb-4'),
-        html.Div([
-            html.Label("Select Date", className='custom-label'),
-            dcc.DatePickerSingle(
-                id='date-picker',
-                date=date.today(),
-                display_format='YYYY-MM-DD',
-                min_date_allowed=date(2025, 1, 1),
-                max_date_allowed=date(2025, 12, 31),
-                className='custom-datepicker form-control'
-            ),
-            html.Label("Recent Games for Stats Blending", className='custom-label'),
-            dcc.Slider(
-                id='recent-slider',
-                min=5,
-                max=30,
-                step=5,
-                value=30,
-                marks={i: str(i) for i in range(5, 31, 5)},
-                className='custom-slider'
-            ),
-        ], className='custom-container'),
-        dcc.Tabs(id='tabs', value='game-outcomes', children=[
-            dcc.Tab(label='Game Outcomes', value='game-outcomes', className='nav-link'),
-            dcc.Tab(label='HR Projections', value='hr', className='nav-link'),
-            dcc.Tab(label='Backtest', value='backtest', className='nav-link'),
-        ], className='nav nav-tabs'),
-        html.Div(id='tabs-content', className='mt-4'),
-        dcc.Store(id='store-data', data={}),
-        dcc.Interval(
-            id='interval-component',
-            interval=5*60*1000,  # Update every 5 minutes
-            n_intervals=0
-        ),
-    ])
+    # Season-Long Backtest
+    st.subheader("Season-Long Backtest for Win Probabilities")
+    season_backtest_results = backtest_season()
+    high_conf = season_backtest_results.get('high_conf', {})
+    st.write(f"Record for projections over 75%: {high_conf.get('record', 'N/A')} ({high_conf.get('win_rate', '')})")
+    grouped_data = season_backtest_results.get('grouped', [])
+    if grouped_data:
+        grouped_df = pd.DataFrame(grouped_data)
+        grouped_df['WinRate'] = grouped_df['WinRate'].apply(lambda x: f'{x:.2%}')
+        st.dataframe(grouped_df[['BinRange', 'Wins', 'Losses', 'WinRate']], use_container_width=True)
+    else:
+        st.write("No season-long data available.")
 
-    @app.callback(
-        Output('store-data', 'data'),
-        [Input('date-picker', 'date'), Input('recent-slider', 'value'), Input('interval-component', 'n_intervals')]
-    )
-    def update_data(selected_date, recent_games, n_intervals):
-        # Clear cache on interval to ensure fresh data
-        _FETCH_CACHE.clear()
-        schedule_df, pitching_df, team_batting_df, player_batting_df, recent_pitching_df, recent_team_batting_df, recent_player_batting_df = prepare_data(date_str=selected_date, recent_games=recent_games)
-        projections_df = project_game_outcomes(schedule_df, pitching_df, team_batting_df, recent_pitching_df, recent_team_batting_df)
-        hr_projections_df = project_home_run_hitters(schedule_df, player_batting_df, pitching_df, recent_player_batting_df, recent_pitching_df)
-        data = {
-            'projections': projections_df.to_dict('records'),
-            'hr_projections': hr_projections_df.to_dict('records'),
-            'schedule': schedule_df.to_dict('records'),
-        }
-        return data
-
-    @app.callback(
-        Output('tabs-content', 'children'),
-        [Input('tabs', 'value'), Input('store-data', 'data'), Input('date-picker', 'date')]
-    )
-    def render_content(tab, stored_data, selected_date):
-        if not stored_data:
-            return html.Div("Loading data...", className='text-center text-muted')
-        projections_df = pd.DataFrame(stored_data['projections'])
-        hr_projections_df = pd.DataFrame(stored_data['hr_projections'])
-        schedule_df = pd.DataFrame(stored_data['schedule'])
-
-        if tab == 'game-outcomes':
-            if projections_df.empty:
-                return html.Div("No game projections available.", className='text-center text-muted')
-            display_cols = ['HomeTeam', 'AwayTeam', 'HomeWinProb', 'AwayWinProb', 'ProjectedWinner', 'HomeExpectedRuns', 'AwayExpectedRuns', 'TotalExpectedRuns', 'GameStatus', 'ProjectionStatus', 'HomeScore', 'AwayScore']
-            return [
-                html.Div([
-                    dash_table.DataTable(
-                        id='game-outcomes-table',
-                        data=projections_df[display_cols].to_dict('records'),
-                        columns=[
-                            {'name': col, 'id': col, 'type': 'numeric' if col in ['HomeWinProb', 'AwayWinProb', 'HomeExpectedRuns', 'AwayExpectedRuns', 'TotalExpectedRuns', 'HomeScore', 'AwayScore'] else 'text'}
-                            for col in display_cols
-                        ],
-                        style_data_conditional=STYLE_DATA_CONDITIONAL,
-                        style_cell=STYLE_CELL,
-                        style_header=STYLE_HEADER,
-                        style_table=STYLE_TABLE,
-                        style_data={
-                            'whiteSpace': 'normal',
-                            'height': 'auto',
-                        },
-                        css=[{'selector': '.dash-cell', 'rule': 'vertical-align: middle;'}],
-                    )
-                ], className='dash-table-container')
-            ]
-        elif tab == 'hr':
-            if hr_projections_df.empty:
-                return html.Div("No HR projections available.", className='text-center text-muted')
-            display_cols = ['PlayerName', 'Team', 'HRProb', 'ProjectionStatus']
-            hr_projections_df = hr_projections_df.sort_values(by='HRProb', ascending=False)
-            return [
-                html.Div([
-                    dash_table.DataTable(
-                        id='hr-projections-table',
-                        data=hr_projections_df[display_cols].to_dict('records'),
-                        columns=[
-                            {'name': col, 'id': col, 'type': 'numeric' if col == 'HRProb' else 'text'}
-                            for col in display_cols
-                        ],
-                        style_data_conditional=STYLE_DATA_CONDITIONAL,
-                        style_cell=STYLE_CELL,
-                        style_header=STYLE_HEADER,
-                        style_table=STYLE_TABLE,
-                        style_data={
-                            'whiteSpace': 'normal',
-                            'height': 'auto',
-                        },
-                        css=[{'selector': '.dash-cell', 'rule': 'vertical-align: middle;'}],
-                    )
-                ], className='dash-table-container')
-            ]
-        elif tab == 'backtest':
-            selected_dt = datetime.strptime(selected_date, '%Y-%m-%d').date()
-            today = date.today()
-            content = []
-            if selected_dt < today:
-                game_back = backtest_game_projections(projections_df)
-                hr_back = backtest_hr_projections(hr_projections_df)
-                content.append(html.H3(f"Daily Game Backtest: Brier Score = {game_back['brier_score']:.4f}, Accuracy = {game_back['accuracy']:.3f}", className='text-center'))
-                content.append(html.H3(f"Daily HR Backtest: Brier Score = {hr_back['brier_score']:.4f}, Hit Rate = {hr_back['hit_rate']:.3f}", className='text-center'))
-            else:
-                content.append(html.Div("Daily backtest not available for current or future dates.", className='text-center text-muted'))
-            
-            # Season-long backtest section
-            content.append(html.H3("Season-Long Backtest for Win Probabilities", className='text-center mt-4'))
-            high_conf = season_backtest_results.get('high_conf', {})
-            content.append(html.P(f"Record for projections over 75%: {high_conf.get('record', 'N/A')} ({high_conf.get('win_rate', '')})", className='text-center'))
-            
-            grouped_data = season_backtest_results.get('grouped', [])
-            if grouped_data:
-                content.append(html.Div([
-                    dash_table.DataTable(
-                        id='season-backtest-table',
-                        data=grouped_data,
-                        columns=[
-                            {'name': 'BinRange', 'id': 'BinRange'},
-                            {'name': 'Wins', 'id': 'Wins'},
-                            {'name': 'Losses', 'id': 'Losses'},
-                            {'name': 'WinRate', 'id': 'WinRate', 'type': 'numeric', 'format': {'specifier': '.2%'}}
-                        ],
-                        style_cell=STYLE_CELL,
-                        style_header=STYLE_HEADER,
-                        style_table=STYLE_TABLE,
-                    )
-                ], className='dash-table-container'))
-            else:
-                content.append(html.P("No season-long data available.", className='text-center'))
-            
-            return html.Div(content, className='mt-3')
-
-    return app
-
-def main():
-    logger.info("Starting MLB Projections")
-    app = build_dash_app()
-
-if __name__ == '__main__':
-    app.run(debug=True)
+# Custom CSS
+st.markdown("""
+<style>
+body {
+    font-family: Arial, sans-serif;
+}
+.stTabs [role="tab"] {
+    font-size: 16px;
+}
+.stDataFrame {
+    width: 100%;
+}
+</style>
+""", unsafe_allow_html=True)
